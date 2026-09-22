@@ -56,7 +56,26 @@ CREATE TABLE IF NOT EXISTS energy (
   kwh REAL NOT NULL,
   hour INTEGER NOT NULL    -- 0-23
 );
+CREATE TABLE IF NOT EXISTS repair_tickets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,  -- 设备删除后保留历史工单
+  device_name TEXT NOT NULL,       -- 设备名称快照
+  alert_text TEXT NOT NULL DEFAULT '',  -- 发起时的告警内容
+  note TEXT NOT NULL DEFAULT '',   -- 住户报修描述
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending待接单/repairing检修中/fixed待确认/done已完成/cancelled已取消
+  result TEXT NOT NULL DEFAULT '', -- 维护人员检修结论
+  created_at TEXT NOT NULL,
+  accepted_at TEXT,
+  fixed_at TEXT,
+  confirmed_at TEXT
+);
 `)
+
+// 迁移：设备隔离标记。检修工单接单后置 1，期间禁止手动与场景操作，住户确认后解除。
+const devCols = db.prepare('PRAGMA table_info(devices)').all().map((c) => c.name)
+if (!devCols.includes('isolated')) {
+  db.exec('ALTER TABLE devices ADD COLUMN isolated INTEGER NOT NULL DEFAULT 0')
+}
 
 // 迁移：旧版 scene_actions 只有 device_key（名称），重建为 device_id 稳定关联。
 // 名称唯一命中的正常绑定；重名设备无法判定原引用究竟指向哪一台，一律置 NULL（保留名称快照，

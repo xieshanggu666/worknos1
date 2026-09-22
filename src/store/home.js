@@ -19,13 +19,16 @@ export const useHomeStore = defineStore('home', {
     logs: [],
     energy: [],
     alerts: [],
+    repairs: [],
     toast: null
   }),
   getters: {
     onlineCount: (s) => s.devices.filter((d) => d.status === 'online').length,
     errorCount: (s) => s.devices.filter((d) => d.status === 'error').length,
     onCount: (s) => s.devices.filter((d) => d.power_on).length,
-    totalWatts: (s) => s.devices.reduce((sum, d) => sum + (d.power_on ? d.watts : 0), 0)
+    totalWatts: (s) => s.devices.reduce((sum, d) => sum + (d.power_on ? d.watts : 0), 0),
+    activeRepairs: (s) => s.repairs.filter((r) => ['pending', 'repairing', 'fixed'].includes(r.status)),
+    isolatedCount: (s) => s.devices.filter((d) => d.isolated).length
   },
   actions: {
     async load() {
@@ -37,6 +40,7 @@ export const useHomeStore = defineStore('home', {
       this.logs = d.logs
       this.energy = d.energy
       this.alerts = d.alerts
+      this.repairs = d.repairs
       this.loaded = true
     },
     toastMsg(msg, type = 'info') {
@@ -81,6 +85,31 @@ export const useHomeStore = defineStore('home', {
       } catch (e) {
         this.toastMsg(e.message, 'warn')
       }
+    },
+
+    // ===== 维修工单 =====
+    async createRepair(p) {
+      try {
+        await api('/repair', 'POST', p); await this.load()
+        this.toastMsg('报修已提交，等待维护人员接单', 'success')
+        return true
+      } catch (e) { this.toastMsg(e.message, 'warn'); return false }
+    },
+    async acceptRepair(id) {
+      try { await api(`/repair/${id}/accept`, 'POST'); await this.load(); this.toastMsg('已接单，设备已隔离', 'success') }
+      catch (e) { this.toastMsg(e.message, 'warn') }
+    },
+    async fixRepair(id, result) {
+      try { await api(`/repair/${id}/fix`, 'POST', { result }); await this.load(); this.toastMsg('检修完成，待住户确认', 'success') }
+      catch (e) { this.toastMsg(e.message, 'warn') }
+    },
+    async confirmRepair(id) {
+      try { await api(`/repair/${id}/confirm`, 'POST'); await this.load(); this.toastMsg('已确认，设备恢复控制', 'success') }
+      catch (e) { this.toastMsg(e.message, 'warn') }
+    },
+    async cancelRepair(id) {
+      try { await api(`/repair/${id}/cancel`, 'POST'); await this.load(); this.toastMsg('报修已取消', 'info') }
+      catch (e) { this.toastMsg(e.message, 'warn') }
     }
   }
 })

@@ -15,6 +15,7 @@
       <DevicesView v-else-if="tab==='devices'" />
       <ScenesView v-else-if="tab==='scenes'" />
       <EnergyView v-else-if="tab==='energy'" />
+      <RepairsView v-else-if="tab==='repairs'" />
       <LogsView v-else-if="tab==='logs'" />
     </main>
 
@@ -31,6 +32,7 @@ import DashboardView from '@/components/DashboardView.vue'
 import DevicesView from '@/components/DevicesView.vue'
 import ScenesView from '@/components/ScenesView.vue'
 import EnergyView from '@/components/EnergyView.vue'
+import RepairsView from '@/components/RepairsView.vue'
 import LogsView from '@/components/LogsView.vue'
 
 const store = useHomeStore()
@@ -40,6 +42,7 @@ const tabs = [
   { key: 'devices', icon: '📟', label: '设备管理' },
   { key: 'scenes', icon: '🎬', label: '场景联动' },
   { key: 'energy', icon: '⚡', label: '能耗统计' },
+  { key: 'repairs', icon: '🔧', label: '维修工单', badge: () => store.activeRepairs.length || 0 },
   { key: 'logs', icon: '📜', label: '日志' }
 ]
 onMounted(async () => {

@@ -18,20 +18,22 @@
     </form>
 
     <div class="list">
-      <div v-for="d in filtered" :key="d.id" class="dev" :class="{off:!d.power_on, err:d.status==='error'}">
+      <div v-for="d in filtered" :key="d.id" class="dev" :class="{off:!d.power_on, err:d.status==='error', iso:d.isolated}">
         <div class="d-head">
           <span class="d-icon">{{ d.type_icon }}</span>
           <div class="d-info">
             <b>{{ d.name }}</b>
             <span class="room">{{ d.room }} · {{ d.type_name }}</span>
           </div>
+          <span v-if="d.isolated" class="badge iso">🔒 隔离中</span>
           <span class="badge" :class="d.status">{{ d.status==='online'?'在线':d.status==='error'?'异常':'离线' }}</span>
-          <label class="switch">
-            <input type="checkbox" :checked="!!d.power_on" @change="store.toggleDevice(d.id)" :disabled="d.status==='error'"/>
+          <label class="switch" :title="d.isolated ? '设备检修隔离中，禁止手动操作' : ''">
+            <input type="checkbox" :checked="!!d.power_on" @change="store.toggleDevice(d.id)" :disabled="d.status==='error' || d.isolated"/>
             <span></span>
           </label>
           <button class="mini-del" @click="remove(d)">✕</button>
         </div>
+        <div v-if="d.isolated" class="iso-hint">维修工单处理中，手动与场景操作已暂停</div>
         <div class="d-meta">
           <span>🔋{{ d.battery }}%</span>
           <span>📶{{ d.signal }}</span>
@@ -84,6 +86,7 @@ select,input,button{font-family:inherit;background:#13233f;border:1px solid rgba
 .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;}
 .dev{background:#0f1b38;border:1px solid rgba(120,160,220,0.16);border-radius:12px;padding:12px;}
 .dev.err{border-color:rgba(239,83,80,0.5);}
+.dev.iso{border-color:rgba(255,179,0,0.45);}
 .dev.off{opacity:.75;}
 .d-head{display:flex;align-items:center;gap:8px;}
 .d-icon{font-size:22px;}
@@ -92,6 +95,8 @@ select,input,button{font-family:inherit;background:#13233f;border:1px solid rgba
 .room{font-size:11px;color:#8ba2c8;}
 .badge{font-size:10px;padding:2px 8px;border-radius:6px;}
 .badge.online{background:#1b5e20;color:#a5d6a7;}.badge.error{background:#b71c1c;color:#ffcdd2;}
+.badge.iso{background:#4e342e;color:#ffcc80;}
+.iso-hint{margin-top:8px;font-size:10px;color:#ffcc80;background:#2a2111;border:1px solid rgba(255,179,0,0.3);border-radius:6px;padding:4px 8px;}
 .switch{position:relative;width:40px;height:22px;}
 .switch input{opacity:0;width:0;height:0;}
 .switch span{position:absolute;inset:0;background:#243357;border-radius:22px;transition:.2s;cursor:pointer;}

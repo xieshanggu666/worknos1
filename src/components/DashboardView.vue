@@ -7,6 +7,7 @@
       <div class="stat-card red"><span class="icon">🔴</span><div><b>{{ store.errorCount }}</b><em>异常</em></div></div>
       <div class="stat-card amber"><span class="icon">⚡</span><div><b>{{ onCount }}<em>开启中</em></b><em class="small">{{ (store.totalWatts/1000).toFixed(1) }} kW</em></div></div>
       <div class="stat-card blue"><span class="icon">🔔</span><div><b>{{ store.alerts.length }}</b><em>活跃告警</em></div></div>
+      <div class="stat-card purple"><span class="icon">🔧</span><div><b>{{ store.activeRepairs.length }}</b><em>维修工单</em></div></div>
     </div>
 
     <div class="dash-grid">
@@ -39,6 +40,22 @@
         <div v-for="(a,i) in store.alerts" :key="i" class="alert" :class="a.level">
           <span class="a-ic">{{ a.level==='error'?'🔴':a.level==='warn'?'🟠':'🔵' }}</span>
           <div class="a-info"><b>{{ a.device }}</b><span>{{ a.text }}</span></div>
+          <span v-if="ticketOf(a.device_id)" class="repairing-tag">已报修·{{ STATUS[ticketOf(a.device_id).status] }}</span>
+          <button v-else-if="a.device_id" class="repair-btn" @click="openRepair(a)">🔧 报修</button>
+        </div>
+      </div>
+
+      <!-- 维修工单 -->
+      <div class="card">
+        <h4>🔧 维修工单</h4>
+        <div v-if="!repairBoard.length" class="none">✨ 暂无工单</div>
+        <div v-for="t in repairBoard" :key="t.id" class="repair" :class="t.status">
+          <span class="r-ic">{{ t.status==='done'?'✅':t.status==='cancelled'?'🚫':t.status==='fixed'?'🟣':t.status==='repairing'?'🟠':'🔵' }}</span>
+          <div class="r-info">
+            <b>{{ t.device_name }}<em class="r-tid">#{{ t.id }}</em></b>
+            <span>{{ t.status==='done' ? (t.result || '已完成') : t.alert_text || t.note || '—' }}</span>
+          </div>
+          <span class="r-status">{{ STATUS[t.status] }}</span>
         </div>
       </div>
 
@@ -53,14 +70,42 @@
         </div>
       </div>
     </div>
+
+    <!-- 发起报修弹窗 -->
+    <div v-if="repairForm" class="mask" @click.self="repairForm=null">
+      <form class="dialog" @submit.prevent="submitRepair">
+        <h4>🔧 发起报修</h4>
+        <div class="f-dev"><b>{{ repairForm.device }}</b><span>{{ repairForm.text }}</span></div>
+        <textarea v-model="repairForm.note" placeholder="补充描述（选填），如：灯不亮、频繁掉线…" rows="3"></textarea>
+        <div class="f-btns">
+          <button type="submit" class="ok">提交报修</button>
+          <button type="button" class="ghost" @click="repairForm=null">取消</button>
+        </div>
+      </form>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useHomeStore } from '@/store/home'
 const store = useHomeStore()
 const onCount = computed(() => store.onCount)
+
+// ===== 报修 =====
+const STATUS = { pending: '待接单', repairing: '检修中', fixed: '待确认', done: '已完成', cancelled: '已取消' }
+const repairForm = ref(null)
+const ticketOf = (deviceId) => deviceId && store.activeRepairs.find((r) => r.device_id === deviceId)
+const repairBoard = computed(() => store.repairs.slice(0, 6))
+function openRepair(a) { repairForm.value = { device_id: a.device_id, device: a.device, text: a.text, note: '' } }
+async function submitRepair() {
+  const ok = await store.createRepair({
+    device_id: repairForm.value.device_id,
+    alert_text: repairForm.value.text,
+    note: repairForm.value.note.trim()
+  })
+  if (ok) repairForm.value = null
+}
 
 const roomStats = computed(() => {
   const m = {}
@@ -103,6 +148,7 @@ const chartData = computed(() => {
 .stat-card em{font-size:11px;color:#8ba2c8;font-style:normal;}
 .stat-card em.small{color:#ffd54f;}
 .stat-card.red b{color:#ef5350;}.stat-card.green b{color:#66bb6a;}.stat-card.amber b{color:#ffb300;}.stat-card.blue b{color:#42a5f5;}
+.stat-card.purple b{color:#ba68c8;}
 .dash-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;}
 @media(max-width:860px){.dash-grid{grid-template-columns:1fr;}}
 .card{background:#0f1b38;border:1px solid rgba(120,160,220,0.16);border-radius:12px;padding:16px;}
@@ -122,6 +168,27 @@ h4{margin:0 0 12px;color:#fff;font-size:14px;}
 .a-info b{display:block;color:#dbe4f3;font-size:13px;}
 .a-info span{font-size:11px;color:#8ba2c8;}
 .alert.error b{color:#ef5350;}.alert.warn b{color:#ffb300;}
+.repair-btn{margin-left:auto;background:#13233f;border:1px solid rgba(120,160,220,0.3);color:#90caf9;border-radius:7px;padding:4px 10px;font-size:11px;cursor:pointer;flex:none;font-family:inherit;}
+.repair-btn:hover{border-color:#42a5f5;color:#fff;}
+.repairing-tag{margin-left:auto;font-size:10px;color:#ffcc80;background:#2a2111;border:1px solid rgba(255,179,0,0.3);border-radius:6px;padding:2px 8px;flex:none;}
+.repair{display:flex;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(120,160,220,0.1);align-items:center;}
+.repair:last-child{border-bottom:none;}
+.repair.done,.repair.cancelled{opacity:.6;}
+.r-info{flex:1;min-width:0;}
+.r-info b{display:block;color:#dbe4f3;font-size:13px;}
+.r-tid{font-style:normal;color:#5b6f94;font-size:10px;margin-left:6px;}
+.r-info span{font-size:11px;color:#8ba2c8;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.r-status{font-size:10px;color:#90caf9;background:#16263f;border-radius:6px;padding:2px 8px;flex:none;}
+.mask{position:fixed;inset:0;background:rgba(4,8,18,0.6);z-index:40;display:grid;place-items:center;}
+.dialog{background:#0f1b38;border:1px solid rgba(120,160,220,0.25);border-radius:14px;padding:18px;width:min(400px,90vw);display:flex;flex-direction:column;gap:12px;}
+.dialog h4{margin:0;color:#fff;}
+.f-dev{background:#13233f;border-radius:8px;padding:10px 12px;}
+.f-dev b{display:block;color:#fff;font-size:13px;}
+.f-dev span{font-size:11px;color:#8ba2c8;}
+.dialog textarea{font-family:inherit;background:#13233f;border:1px solid rgba(120,160,220,0.2);color:#dbe4f3;border-radius:8px;padding:8px 10px;font-size:12px;resize:vertical;}
+.f-btns{display:flex;gap:8px;}
+.f-btns .ok{flex:1;background:linear-gradient(135deg,#43a047,#2e7d32);border:none;color:#fff;border-radius:8px;padding:9px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
+.f-btns .ghost{background:#16263f;border:1px solid rgba(120,160,220,0.2);color:#8ba2c8;border-radius:8px;padding:9px 16px;cursor:pointer;font-family:inherit;}
 .energy-chart{display:flex;align-items:flex-end;gap:4px;height:160px;padding-top:10px;}
 .bar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;}
 .bar i{width:70%;border-radius:4px 4px 0 0;min-height:4px;transition:height .3s;}

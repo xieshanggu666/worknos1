@@ -27,6 +27,7 @@ const store = useHomeStore()
 function reload() { store.load() }
 function levelDot(l) {
   const t = l.action
+  if (t.includes('报修') || t.includes('维修') || t.includes('检修') || t.includes('恢复控制')) return 'repair'
   if (t.includes('关')) return 'off'
   if (t.includes('开')) return 'on'
   if (t.includes('场景')) return 'scene'
@@ -43,7 +44,7 @@ function levelDot(l) {
 .timeline{border-left:2px solid #1a2a4a;padding-left:18px;display:flex;flex-direction:column;gap:14px;max-height:520px;overflow-y:auto;padding-right:8px;}
 .entry{position:relative;}
 .dot{position:absolute;left:-24px;top:4px;width:11px;height:11px;border-radius:50%;background:#546e7a;border:2px solid #0a1224;}
-.dot.on{background:#66bb6a;}.dot.off{background:#ef5350;}.dot.scene{background:#ffd54f;}.dot.sys{background:#42a5f5;}
+.dot.on{background:#66bb6a;}.dot.off{background:#ef5350;}.dot.scene{background:#ffd54f;}.dot.sys{background:#42a5f5;}.dot.repair{background:#ab47bc;}
 .body{background:#0f1b38;border:1px solid rgba(120,160,220,0.14);border-radius:10px;padding:10px 12px;}
 .line{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
 .line b{color:#fff;font-size:13px;}
