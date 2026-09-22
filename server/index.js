@@ -38,6 +38,12 @@ app.get('/api/state', (req, res) => {
     }),
     logs: q('SELECT * FROM device_logs ORDER BY id DESC LIMIT 50'),
     energy: q('SELECT * FROM energy'),
+    repairs: q(`SELECT ro.*, d.isolated dev_isolated
+                FROM repair_orders ro LEFT JOIN devices d ON d.id=ro.device_id
+                ORDER BY CASE ro.status
+                  WHEN 'pending' THEN 0 WHEN 'accepted' THEN 1
+                  WHEN 'isolated' THEN 2 WHEN 'repaired' THEN 3 ELSE 4 END, ro.id DESC
+                LIMIT 30`),
     alerts: computeAlerts()
   })
 })
@@ -46,7 +52,8 @@ function computeAlerts() {
   const devs = q('SELECT * FROM devices')
   const alerts = []
   for (const d of devs) {
-    if (d.status === 'error') alerts.push({ device: d.name, level: 'error', text: '设备离线/异常' })
+    if (d.isolated) alerts.push({ device: d.name, level: 'warn', text: '设备检修隔离中，控制已锁定' })
+    else if (d.status === 'error') alerts.push({ device: d.name, level: 'error', text: '设备离线/异常' })
     else if (d.battery < 40) alerts.push({ device: d.name, level: 'warn', text: `电量低(${d.battery}%)` })
     else if (d.signal < 60) alerts.push({ device: d.name, level: 'warn', text: `信号弱(${d.signal})` })
   }
@@ -71,6 +78,10 @@ app.post('/api/device', (req, res) => {
 app.delete('/api/device/:id', (req, res) => {
   const d = q1('SELECT * FROM devices WHERE id=?', req.params.id)
   if (!d) return res.status(404).json({ error: 'not found' })
+  if (d.isolated) {
+    log(d.name, '删除设备被阻止', '设备检修隔离中')
+    return res.status(409).json({ error: '设备检修隔离中，无法删除' })
+  }
   // 引用该设备的场景动作将随外键 ON DELETE SET NULL 置空（失效引用）
   const affected = q1('SELECT COUNT(*) c FROM scene_actions WHERE device_id=?', d.id).c
   run('DELETE FROM devices WHERE id=?', d.id)
@@ -81,6 +92,10 @@ app.delete('/api/device/:id', (req, res) => {
 app.post('/api/device/:id/toggle', (req, res) => {
   const d = q1('SELECT * FROM devices WHERE id=?', req.params.id)
   if (!d) return res.status(404).json({ error: 'not found' })
+  if (d.isolated) {
+    log(d.name, '手动操作被阻止', '设备检修隔离中，控制已锁定')
+    return res.status(423).json({ error: '设备检修隔离中，无法手动操作' })
+  }
   if (d.status === 'error') return res.status(409).json({ error: '设备异常，无法操作' })
   const on = d.power_on ? 0 : 1
   run('UPDATE devices SET power_on=? WHERE id=?', on, d.id)
@@ -92,6 +107,11 @@ app.post('/api/device/:id/update', (req, res) => {
   const d = q1('SELECT * FROM devices WHERE id=?', req.params.id)
   if (!d) return res.status(404).json({ error: 'not found' })
   const { name, room_id, watts, power_on } = req.body
+  // 隔离期间禁止一切控制（含远程改开关状态）；名称/房间/功率等资料仍可维护
+  if (d.isolated && power_on != null && !!power_on !== !!d.power_on) {
+    log(d.name, '手动操作被阻止', '设备检修隔离中，控制已锁定')
+    return res.status(423).json({ error: '设备检修隔离中，无法手动操作' })
+  }
   run('UPDATE devices SET name=?, room_id=?, watts=?, power_on=? WHERE id=?',
     name ?? d.name, room_id ?? d.room_id, watts ?? d.watts, power_on ?? d.power_on, d.id)
   // 改名后同步场景动作里的名称快照（关联仍按 device_id，不受影响）
@@ -132,7 +152,7 @@ app.post('/api/scene/:id/run', (req, res) => {
   const s = q1('SELECT * FROM scenes WHERE id=?', req.params.id)
   if (!s) return res.status(404).json({ error: 'not found' })
   if (!s.enabled) return res.status(409).json({ error: '场景已停用，无法执行' })
-  const actions = q(`SELECT sa.*, d.id did, d.name dname, d.status dstatus,
+  const actions = q(`SELECT sa.*, d.id did, d.name dname, d.status dstatus, d.isolated disolated,
                             (SELECT COUNT(*) FROM devices x WHERE x.name=sa.device_key) key_match_count
                      FROM scene_actions sa LEFT JOIN devices d ON d.id=sa.device_id
                      WHERE sa.scene_id=? ORDER BY sa.order_no, sa.id`, s.id)
@@ -147,6 +167,12 @@ app.post('/api/scene/:id/run', (req, res) => {
       log(label, `场景「${s.name}」执行失败`, `${a.action}（${reason}）`)
       continue
     }
+    if (a.disolated) {
+      // 检修隔离中的设备，场景联动同样必须锁定，绝不允许旁路
+      failed.push({ device: a.dname, action: a.action, reason: '设备检修隔离中' })
+      log(a.dname, `场景「${s.name}」执行被阻止`, `${a.action}（设备检修隔离中）`)
+      continue
+    }
     if (a.dstatus !== 'online') {
       failed.push({ device: a.dname, action: a.action, reason: '设备离线/异常' })
       log(a.dname, `场景「${s.name}」执行失败`, `${a.action}（设备离线/异常）`)
@@ -159,6 +185,80 @@ app.post('/api/scene/:id/run', (req, res) => {
     executed.push({ device: a.dname, action: a.action })
   }
   res.json({ ok: failed.length === 0, executed, failed })
+})
+
+// ===== 报修工单 =====
+// 活跃工单（未终结：非 done/cancelled）
+const ACTIVE = `status IN ('pending','accepted','isolated','repaired')`
+
+// 住户从告警发起报修
+app.post('/api/repair', (req, res) => {
+  const { device_id, reason } = req.body
+  const d = q1('SELECT * FROM devices WHERE id=?', device_id)
+  if (!d) return res.status(404).json({ error: '设备不存在' })
+  const exist = q1(`SELECT * FROM repair_orders WHERE device_id=? AND ${ACTIVE}`, d.id)
+  if (exist) return res.status(409).json({ error: `该设备已有进行中的工单（#${exist.id}）` })
+  const r = run('INSERT INTO repair_orders (device_id,device_name,reason,created_at) VALUES (?,?,?,?)',
+    d.id, d.name, (reason || '').slice(0, 100), now())
+  log(d.name, '发起报修', `工单 #${r.lastInsertRowid}：${reason || '设备异常'}`)
+  res.json({ ok: true, id: r.lastInsertRowid })
+})
+
+// 维护人员接单
+app.post('/api/repair/:id/accept', (req, res) => {
+  const o = q1('SELECT * FROM repair_orders WHERE id=?', req.params.id)
+  if (!o) return res.status(404).json({ error: '工单不存在' })
+  if (o.status !== 'pending') return res.status(409).json({ error: '工单已被接单或已处理' })
+  const worker = (req.body?.worker || '维护人员').slice(0, 20)
+  run("UPDATE repair_orders SET status='accepted', worker=?, accepted_at=? WHERE id=?", worker, now(), o.id)
+  log(o.device_name, '维护接单', `工单 #${o.id}，处理人 ${worker}`)
+  res.json({ ok: true })
+})
+
+// 维护人员隔离设备（进入检修）——隔离后手动与场景操作全部锁定
+app.post('/api/repair/:id/isolate', (req, res) => {
+  const o = q1('SELECT * FROM repair_orders WHERE id=?', req.params.id)
+  if (!o) return res.status(404).json({ error: '工单不存在' })
+  if (o.status !== 'accepted') return res.status(409).json({ error: '请先接单再隔离设备' })
+  const d = q1('SELECT * FROM devices WHERE id=?', o.device_id)
+  if (!d) return res.status(404).json({ error: '设备已删除，无法隔离' })
+  run("UPDATE repair_orders SET status='isolated', isolated_at=? WHERE id=?", now(), o.id)
+  run('UPDATE devices SET isolated=1 WHERE id=?', d.id)
+  log(o.device_name, '设备隔离', `工单 #${o.id}，已锁定手动与场景控制`)
+  res.json({ ok: true })
+})
+
+// 维护人员完成检修（可填处理结果）——设备解除隔离、恢复在线，但等待住户确认
+app.post('/api/repair/:id/repair', (req, res) => {
+  const o = q1('SELECT * FROM repair_orders WHERE id=?', req.params.id)
+  if (!o) return res.status(404).json({ error: '工单不存在' })
+  if (o.status !== 'isolated') return res.status(409).json({ error: '设备尚未隔离，不能提交检修结果' })
+  const result = (req.body?.result || '检修完成，设备恢复正常').slice(0, 200)
+  run("UPDATE repair_orders SET status='repaired', result=?, repaired_at=? WHERE id=?", result, now(), o.id)
+  run('UPDATE devices SET isolated=0, status=? WHERE id=?', 'online', o.device_id)
+  log(o.device_name, '检修完成', `工单 #${o.id}，等待住户确认恢复：${result}`)
+  res.json({ ok: true })
+})
+
+// 住户确认——设备控制正式恢复
+app.post('/api/repair/:id/confirm', (req, res) => {
+  const o = q1('SELECT * FROM repair_orders WHERE id=?', req.params.id)
+  if (!o) return res.status(404).json({ error: '工单不存在' })
+  if (o.status !== 'repaired') return res.status(409).json({ error: '工单尚未检修完成，无法确认' })
+  run("UPDATE repair_orders SET status='done', confirmed_at=? WHERE id=?", now(), o.id)
+  log(o.device_name, '住户确认恢复', `工单 #${o.id} 关闭，设备控制已恢复`)
+  res.json({ ok: true })
+})
+
+// 住户取消（仅限接单/隔离之前取消；隔离后须走检修流程，避免绕过安全锁定）
+app.post('/api/repair/:id/cancel', (req, res) => {
+  const o = q1('SELECT * FROM repair_orders WHERE id=?', req.params.id)
+  if (!o) return res.status(404).json({ error: '工单不存在' })
+  if (!['pending', 'accepted'].includes(o.status))
+    return res.status(409).json({ error: '设备已隔离检修，不能取消，请等待检修完成' })
+  run("UPDATE repair_orders SET status='cancelled', cancelled_at=? WHERE id=?", now(), o.id)
+  log(o.device_name, '撤销报修', `工单 #${o.id}`)
+  res.json({ ok: true })
 })
 
 // ===== 日志 =====

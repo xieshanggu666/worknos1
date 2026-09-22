@@ -12,6 +12,7 @@ async function api(path, method = 'GET', body) {
 export const useHomeStore = defineStore('home', {
   state: () => ({
     loaded: false,
+    role: localStorage.getItem('smarthome_role') || 'resident', // resident 住户 / worker 维护人员
     rooms: [],
     types: [],
     devices: [],
@@ -19,13 +20,23 @@ export const useHomeStore = defineStore('home', {
     logs: [],
     energy: [],
     alerts: [],
+    repairs: [],
     toast: null
   }),
   getters: {
     onlineCount: (s) => s.devices.filter((d) => d.status === 'online').length,
     errorCount: (s) => s.devices.filter((d) => d.status === 'error').length,
+    isolatedCount: (s) => s.devices.filter((d) => d.isolated).length,
     onCount: (s) => s.devices.filter((d) => d.power_on).length,
-    totalWatts: (s) => s.devices.reduce((sum, d) => sum + (d.power_on ? d.watts : 0), 0)
+    totalWatts: (s) => s.devices.reduce((sum, d) => sum + (d.power_on && !d.isolated ? d.watts : 0), 0),
+    // 进行中的工单（待接单/已接单/隔离中/待确认）
+    activeRepairs: (s) => s.repairs.filter((r) => ['pending', 'accepted', 'isolated', 'repaired'].includes(r.status)),
+    // 设备 ID → 进行中工单，供告警/设备卡片判断「处理中」
+    activeRepairByDevice() {
+      const m = {}
+      this.activeRepairs.forEach((r) => { if (r.device_id != null) m[r.device_id] = r })
+      return m
+    }
   },
   actions: {
     async load() {
@@ -37,7 +48,12 @@ export const useHomeStore = defineStore('home', {
       this.logs = d.logs
       this.energy = d.energy
       this.alerts = d.alerts
+      this.repairs = d.repairs || []
       this.loaded = true
+    },
+    setRole(role) {
+      this.role = role
+      localStorage.setItem('smarthome_role', role)
     },
     toastMsg(msg, type = 'info') {
       this.toast = { msg, type, id: Date.now() }
@@ -81,6 +97,24 @@ export const useHomeStore = defineStore('home', {
       } catch (e) {
         this.toastMsg(e.message, 'warn')
       }
+    },
+
+    // ===== 报修工单 =====
+    async createRepair(device_id, reason) {
+      try {
+        await api('/repair', 'POST', { device_id, reason })
+        await this.load()
+        this.toastMsg('报修已发起，等待维护人员接单', 'success')
+        return true
+      } catch (e) { this.toastMsg(e.message, 'warn'); return false }
+    },
+    async repairAction(id, act, body, okMsg) {
+      try {
+        await api(`/repair/${id}/${act}`, 'POST', body || {})
+        await this.load()
+        this.toastMsg(okMsg, 'success')
+        return true
+      } catch (e) { this.toastMsg(e.message, 'warn'); return false }
     }
   }
 })

@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS devices (
   battery INTEGER NOT NULL DEFAULT 100,    -- 0-100, 插座类可 100
   signal INTEGER NOT NULL DEFAULT 90,
   power_on INTEGER NOT NULL DEFAULT 0,     -- 0关 1开
-  watts INTEGER NOT NULL DEFAULT 10
+  watts INTEGER NOT NULL DEFAULT 10,
+  isolated INTEGER NOT NULL DEFAULT 0      -- 1=检修隔离中，手动/场景控制一律锁定
 );
 CREATE TABLE IF NOT EXISTS scenes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +57,32 @@ CREATE TABLE IF NOT EXISTS energy (
   kwh REAL NOT NULL,
   hour INTEGER NOT NULL    -- 0-23
 );
+CREATE TABLE IF NOT EXISTS repair_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,  -- 设备删除后工单留档
+  device_name TEXT NOT NULL,                  -- 设备名称快照
+  reason TEXT NOT NULL DEFAULT '',            -- 住户报修描述（来自告警/手动）
+  status TEXT NOT NULL DEFAULT 'pending',     -- pending/accepted/isolated/repaired/done/cancelled
+  resident TEXT NOT NULL DEFAULT '住户',
+  worker TEXT NOT NULL DEFAULT '',            -- 接单/处理的维护人员
+  result TEXT NOT NULL DEFAULT '',            -- 维护人员填写的检修结果
+  created_at TEXT NOT NULL,
+  accepted_at TEXT NOT NULL DEFAULT '',
+  isolated_at TEXT NOT NULL DEFAULT '',
+  repaired_at TEXT NOT NULL DEFAULT '',
+  confirmed_at TEXT NOT NULL DEFAULT '',
+  cancelled_at TEXT NOT NULL DEFAULT ''
+);
 `)
+
+// 迁移：已有库的 devices 表补 isolated 列（首次建库无需此步）
+function migrateDevicesIsolated() {
+  const cols = db.prepare('PRAGMA table_info(devices)').all().map((c) => c.name)
+  if (!cols.includes('isolated')) {
+    db.exec('ALTER TABLE devices ADD COLUMN isolated INTEGER NOT NULL DEFAULT 0')
+  }
+}
+migrateDevicesIsolated()
 
 // 迁移：旧版 scene_actions 只有 device_key（名称），重建为 device_id 稳定关联。
 // 名称唯一命中的正常绑定；重名设备无法判定原引用究竟指向哪一台，一律置 NULL（保留名称快照，

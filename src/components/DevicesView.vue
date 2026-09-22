@@ -18,25 +18,32 @@
     </form>
 
     <div class="list">
-      <div v-for="d in filtered" :key="d.id" class="dev" :class="{off:!d.power_on, err:d.status==='error'}">
+      <div v-for="d in filtered" :key="d.id" class="dev" :class="{off:!d.power_on, err:d.status==='error', locked:d.isolated}">
         <div class="d-head">
           <span class="d-icon">{{ d.type_icon }}</span>
           <div class="d-info">
             <b>{{ d.name }}</b>
             <span class="room">{{ d.room }} · {{ d.type_name }}</span>
           </div>
-          <span class="badge" :class="d.status">{{ d.status==='online'?'在线':d.status==='error'?'异常':'离线' }}</span>
-          <label class="switch">
-            <input type="checkbox" :checked="!!d.power_on" @change="store.toggleDevice(d.id)" :disabled="d.status==='error'"/>
+          <span v-if="d.isolated" class="badge locked-badge">🚧 隔离中</span>
+          <span v-else-if="orderOf(d)" class="badge repair-badge">🛠️ {{ orderText(orderOf(d).status) }}</span>
+          <span v-else class="badge" :class="d.status">{{ d.status==='online'?'在线':d.status==='error'?'异常':'离线' }}</span>
+          <label class="switch" :title="d.isolated ? '检修隔离中，控制已锁定' : ''">
+            <input type="checkbox" :checked="!!d.power_on" @change="store.toggleDevice(d.id)"
+                   :disabled="d.status==='error' || d.isolated"/>
             <span></span>
           </label>
-          <button class="mini-del" @click="remove(d)">✕</button>
+          <button class="mini-del" @click="remove(d)" :disabled="d.isolated" :title="d.isolated?'隔离中无法删除':'删除设备'">✕</button>
         </div>
         <div class="d-meta">
           <span>🔋{{ d.battery }}%</span>
           <span>📶{{ d.signal }}</span>
           <span>⚡{{ d.watts }}W</span>
           <input class="inline-edit" :value="d.watts" type="number" @change="store.updateDevice(d.id,{watts:+$event.target.value})" title="编辑功率(W)"/>
+        </div>
+        <div v-if="d.isolated" class="lock-tip">🔒 检修隔离中：手动开关与场景联动均已锁定</div>
+        <div v-else-if="!orderOf(d)" class="report-line">
+          <button v-if="store.role==='resident'" class="mini-repair" @click="store.createRepair(d.id,'设备页发起报修')">🛠️ 报修</button>
         </div>
         <div class="meters">
           <div class="m"><i class="batt" :style="{width:Math.min(100,d.battery)+'%'}"></i></div>
@@ -70,6 +77,9 @@ function submit() {
 async function remove(d) {
   if (confirm(`删除设备「${d.name}」？`)) await store.removeDevice(d.id)
 }
+const ORDER_TEXT = { pending: '待接单', accepted: '已接单', isolated: '隔离检修中', repaired: '待确认' }
+function orderOf(d) { return store.activeRepairByDevice[d.id] }
+function orderText(s) { return ORDER_TEXT[s] || s }
 </script>
 
 <style scoped>
@@ -84,7 +94,9 @@ select,input,button{font-family:inherit;background:#13233f;border:1px solid rgba
 .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;}
 .dev{background:#0f1b38;border:1px solid rgba(120,160,220,0.16);border-radius:12px;padding:12px;}
 .dev.err{border-color:rgba(239,83,80,0.5);}
+.dev.locked{border-color:rgba(251,140,0,0.55);background:#1a1408;}
 .dev.off{opacity:.75;}
+.dev.locked.off{opacity:1;}
 .d-head{display:flex;align-items:center;gap:8px;}
 .d-icon{font-size:22px;}
 .d-info{flex:1;min-width:0;}
@@ -92,6 +104,8 @@ select,input,button{font-family:inherit;background:#13233f;border:1px solid rgba
 .room{font-size:11px;color:#8ba2c8;}
 .badge{font-size:10px;padding:2px 8px;border-radius:6px;}
 .badge.online{background:#1b5e20;color:#a5d6a7;}.badge.error{background:#b71c1c;color:#ffcdd2;}
+.badge.locked-badge{background:#e65100;color:#ffe0b2;}
+.badge.repair-badge{background:#37474f;color:#ffcc80;}
 .switch{position:relative;width:40px;height:22px;}
 .switch input{opacity:0;width:0;height:0;}
 .switch span{position:absolute;inset:0;background:#243357;border-radius:22px;transition:.2s;cursor:pointer;}
@@ -99,6 +113,10 @@ select,input,button{font-family:inherit;background:#13233f;border:1px solid rgba
 .switch input:checked+span{background:#2962ff;}
 .switch input:checked+span:before{transform:translateX(18px);background:#fff;}
 .mini-del{background:none;border:none;color:#ef5350;font-size:14px;cursor:pointer;}
+.mini-del:disabled{color:#5b6f94;cursor:not-allowed;}
+.lock-tip{margin-top:8px;font-size:11px;color:#ffb300;background:#3a2208;border:1px solid rgba(251,140,0,0.35);border-radius:7px;padding:5px 8px;}
+.report-line{margin-top:8px;}
+.mini-repair{background:#16263f;border:1px solid rgba(120,160,220,0.25);color:#90caf9;font-size:11px;border-radius:7px;padding:4px 10px;cursor:pointer;}
 .d-meta{display:flex;gap:12px;margin-top:8px;font-size:11px;color:#8ba2c8;}
 .inline-edit{width:60px;padding:3px 6px;font-size:11px;margin-left:auto;}
 .meters{margin-top:6px;}

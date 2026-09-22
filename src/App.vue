@@ -8,12 +8,17 @@
         </button>
       </nav>
       <button class="reload" @click="store.load()">🔄</button>
+      <div class="role-switch" :title="'当前视角：' + (store.role==='resident' ? '住户' : '维护人员')">
+        <button :class="{active:store.role==='resident'}" @click="store.setRole('resident')">🏠 住户</button>
+        <button :class="{active:store.role==='worker'}" @click="store.setRole('worker')">🛠️ 维护</button>
+      </div>
     </header>
 
     <main>
       <DashboardView v-if="tab==='dash'" />
       <DevicesView v-else-if="tab==='devices'" />
       <ScenesView v-else-if="tab==='scenes'" />
+      <RepairsView v-else-if="tab==='repairs'" />
       <EnergyView v-else-if="tab==='energy'" />
       <LogsView v-else-if="tab==='logs'" />
     </main>
@@ -30,6 +35,7 @@ import { useHomeStore } from '@/store/home'
 import DashboardView from '@/components/DashboardView.vue'
 import DevicesView from '@/components/DevicesView.vue'
 import ScenesView from '@/components/ScenesView.vue'
+import RepairsView from '@/components/RepairsView.vue'
 import EnergyView from '@/components/EnergyView.vue'
 import LogsView from '@/components/LogsView.vue'
 
@@ -39,6 +45,7 @@ const tabs = [
   { key: 'dash', icon: '📊', label: '健康看板', badge: () => store.alerts.length || 0 },
   { key: 'devices', icon: '📟', label: '设备管理' },
   { key: 'scenes', icon: '🎬', label: '场景联动' },
+  { key: 'repairs', icon: '🛠️', label: '报修工单', badge: () => store.activeRepairs.length || 0 },
   { key: 'energy', icon: '⚡', label: '能耗统计' },
   { key: 'logs', icon: '📜', label: '日志' }
 ]
@@ -60,6 +67,10 @@ onMounted(async () => {
 .tabs button.active{background:linear-gradient(135deg,#1d3f8f,#2962ff);color:#fff;border-color:transparent;}
 .bd{position:absolute;top:-4px;right:-4px;background:#ef5350;color:#fff;font-size:9px;border-radius:8px;padding:1px 5px;font-weight:700;}
 .reload{margin-left:auto;background:#13233f;border:1px solid rgba(120,160,220,0.3);border-radius:8px;color:#8ba2c8;font-size:16px;cursor:pointer;padding:4px 10px;}
+.role-switch{display:flex;background:#0c1730;border:1px solid rgba(120,160,220,0.2);border-radius:8px;overflow:hidden;}
+.role-switch button{background:transparent;border:none;color:#8ba2c8;font-size:12px;padding:6px 12px;cursor:pointer;border-radius:0;}
+.role-switch button.active{background:linear-gradient(135deg,#1d3f8f,#2962ff);color:#fff;font-weight:600;}
+@media(max-width:860px){.reload{margin-left:0;}}
 main{max-width:1240px;margin:0 auto;padding:18px 20px;}
 .toast{position:fixed;right:20px;top:70px;z-index:50;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,0.4);cursor:pointer;}
 .toast.success{background:#1b5e20;color:#c8e6c9;border:1px solid #388e3c;}

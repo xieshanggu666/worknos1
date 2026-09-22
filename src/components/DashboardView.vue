@@ -5,8 +5,10 @@
       <div class="stat-card"><span class="icon">📟</span><div><b>{{ store.devices.length }}</b><em>全部设备</em></div></div>
       <div class="stat-card green"><span class="icon">🟢</span><div><b>{{ store.onlineCount }}</b><em>在线</em></div></div>
       <div class="stat-card red"><span class="icon">🔴</span><div><b>{{ store.errorCount }}</b><em>异常</em></div></div>
+      <div class="stat-card amber"><span class="icon">🚧</span><div><b>{{ store.isolatedCount }}</b><em>隔离检修</em></div></div>
       <div class="stat-card amber"><span class="icon">⚡</span><div><b>{{ onCount }}<em>开启中</em></b><em class="small">{{ (store.totalWatts/1000).toFixed(1) }} kW</em></div></div>
       <div class="stat-card blue"><span class="icon">🔔</span><div><b>{{ store.alerts.length }}</b><em>活跃告警</em></div></div>
+      <div class="stat-card blue"><span class="icon">🛠️</span><div><b>{{ store.activeRepairs.length }}</b><em>进行中工单</em></div></div>
     </div>
 
     <div class="dash-grid">
@@ -39,6 +41,8 @@
         <div v-for="(a,i) in store.alerts" :key="i" class="alert" :class="a.level">
           <span class="a-ic">{{ a.level==='error'?'🔴':a.level==='warn'?'🟠':'🔵' }}</span>
           <div class="a-info"><b>{{ a.device }}</b><span>{{ a.text }}</span></div>
+          <span v-if="orderOf(a.device)" class="a-order">🛠️ {{ orderText(orderOf(a.device).status) }}</span>
+          <button v-else-if="store.role==='resident'" class="a-repair" @click="report(a)">报修</button>
         </div>
       </div>
 
@@ -61,6 +65,18 @@ import { computed } from 'vue'
 import { useHomeStore } from '@/store/home'
 const store = useHomeStore()
 const onCount = computed(() => store.onCount)
+
+const ORDER_TEXT = { pending: '待接单', accepted: '已接单', isolated: '隔离检修中', repaired: '待确认', done: '已恢复', cancelled: '已撤销' }
+function orderOf(deviceName) {
+  const d = store.devices.find((x) => x.name === deviceName)
+  return d ? store.activeRepairByDevice[d.id] : null
+}
+function orderText(s) { return ORDER_TEXT[s] || s }
+async function report(a) {
+  const d = store.devices.find((x) => x.name === a.device)
+  if (!d) return
+  await store.createRepair(d.id, `告警报修：${a.text}`)
+}
 
 const roomStats = computed(() => {
   const m = {}
@@ -117,10 +133,12 @@ h4{margin:0 0 12px;color:#fff;font-size:14px;}
 .type-item{background:#16263f;border:1px solid rgba(120,160,220,0.12);border-radius:9px;padding:8px 12px;display:flex;gap:8px;align-items:center;font-size:12px;color:#dbe4f3;flex:1;min-width:120px;}
 .t-icon{font-size:18px;}.t-num{color:#ffd54f;margin-left:auto;}
 .none{color:#5b6f94;text-align:center;padding:14px;font-size:12px;}
-.alert{display:flex;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(120,160,220,0.1);}
+.alert{display:flex;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(120,160,220,0.1);align-items:center;}
 .alert:last-child{border-bottom:none;}
 .a-info b{display:block;color:#dbe4f3;font-size:13px;}
 .a-info span{font-size:11px;color:#8ba2c8;}
+.a-repair{margin-left:auto;background:linear-gradient(135deg,#43a047,#2e7d32);border:none;color:#fff;font-size:11px;border-radius:6px;padding:4px 12px;cursor:pointer;white-space:nowrap;}
+.a-order{margin-left:auto;font-size:10px;color:#ffb300;background:#3a2208;border:1px solid rgba(251,140,0,0.4);border-radius:6px;padding:3px 9px;white-space:nowrap;}
 .alert.error b{color:#ef5350;}.alert.warn b{color:#ffb300;}
 .energy-chart{display:flex;align-items:flex-end;gap:4px;height:160px;padding-top:10px;}
 .bar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;}

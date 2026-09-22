@@ -43,8 +43,8 @@
           <span class="badge" :class="s.enabled?'on':'off'">{{ s.enabled?'已启用':'已停用' }}</span>
         </div>
         <div class="actions">
-          <div v-for="a in s.actions" :key="a.id" class="act-chip" :class="{invalid:!a.device_name}">
-            <span class="k">{{ a.device_name || a.device_key || '未知设备' }}<em v-if="!a.device_name">{{ a.unresolved === 'duplicate' ? '重名·待重新绑定' : '已删除' }}</em></span>
+          <div v-for="a in s.actions" :key="a.id" class="act-chip" :class="{invalid:!a.device_name, locked:isIsolated(a)}">
+            <span class="k">{{ a.device_name || a.device_key || '未知设备' }}<em v-if="!a.device_name">{{ a.unresolved === 'duplicate' ? '重名·待重新绑定' : '已删除' }}</em><em v-else-if="isIsolated(a)" class="lk">🔒隔离中</em></span>
             <span class="v">{{ a.action }}</span>
           </div>
           <span v-if="!s.actions.length" class="noact">无动作</span>
@@ -79,6 +79,10 @@ async function run(s) {
   if (r?.failed?.length) lastResult.value = { scene: s.name, failed: r.failed }
   else lastResult.value = null
 }
+function isIsolated(a) {
+  const d = store.devices.find((x) => x.id === a.device_id)
+  return d?.isolated
+}
 async function remove(s) {
   if (confirm(`删除场景「${s.name}」？`)) await store.deleteScene(s.id)
 }
@@ -109,6 +113,8 @@ input,select,button{font-family:inherit;background:#13233f;border:1px solid rgba
 .act-chip .k{padding:4px 6px;color:#90caf9;border-right:1px solid rgba(120,160,220,0.15);}
 .act-chip .k em{font-style:normal;color:#ef5350;font-size:10px;margin-left:4px;}
 .act-chip.invalid{border-color:rgba(239,83,80,0.45);}
+.act-chip.locked{border-color:rgba(251,140,0,0.55);}
+.act-chip .k em.lk{color:#ffb300;}
 .act-chip .v{padding:4px 8px;color:#dbe4f3;}
 .fail-panel{background:#2a1518;border:1px solid rgba(239,83,80,0.4);border-radius:12px;padding:12px 14px;font-size:12px;color:#ffcdd2;display:flex;flex-direction:column;gap:6px;}
 .fail-panel .fail-item{color:#ef9a9a;}
